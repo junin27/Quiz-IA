@@ -1,4 +1,17 @@
+import { z } from 'zod';
+
 export type DifficultyLevel = 'easy' | 'medium' | 'hard' | string;
+
+export const quizQuestionSchema = z.object({
+  id: z.string(),
+  questionText: z.string(),
+  options: z.array(z.string()).length(4),
+  correctOptionIndex: z.number().int().min(0).max(3),
+  explanation: z.string(),
+  isPopularExam: z.boolean().optional(),
+});
+
+export const quizQuestionsSchema = z.array(quizQuestionSchema);
 
 export interface QuizQuestion {
   id: string;

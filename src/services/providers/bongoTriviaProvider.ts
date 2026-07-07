@@ -5,6 +5,8 @@ import type {
   TriviaBankFetchOptions,
 } from '../../types/triviaBanks.types';
 
+import { mapDifficultyScaleToNumber } from '../triviaService';
+
 interface BongoTriviaQuestion {
   id: number;
   question: string;
@@ -91,20 +93,12 @@ export class BongoTriviaProvider extends BaseTriviaBankProvider {
           provider: this.providerName,
           category: categoryName,
           categoryId: options.categoryId,
-          difficulty: this.mapBongoDifficultyToScale(q.difficulty),
+          difficulty: mapDifficultyScaleToNumber(q.difficulty),
           explanation: `A resposta correta é: "${q.correct_answer}".`,
         };
       });
     } catch {
       return [];
     }
-  }
-
-  private mapBongoDifficultyToScale(difficulty: string): string {
-    const lower = difficulty.toLowerCase();
-    if (lower === 'easy') return '3';
-    if (lower === 'medium') return '5';
-    if (lower === 'hard') return '7';
-    return '5';
   }
 }

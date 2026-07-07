@@ -66,6 +66,17 @@ export function mapDifficultyToTrivia(difficultyValue: string): TriviaDifficulty
 }
 
 /**
+ * Mapeia dificuldades textuais de APIs de trivia para valores numéricos padrão (1-10) de string.
+ */
+export function mapDifficultyScaleToNumber(difficulty: string): string {
+  const lower = difficulty.toLowerCase();
+  if (lower === 'easy') return '3';
+  if (lower === 'medium') return '5';
+  if (lower === 'hard') return '7';
+  return '5';
+}
+
+/**
  * Decodifica entidades HTML retornadas pelo Open Trivia DB
  * (e.g. &amp; → &, &#039; → ', &quot; → ").
  */

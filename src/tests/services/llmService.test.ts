@@ -134,6 +134,22 @@ describe('generateQuizQuestions', () => {
     await expect(generateQuizQuestions('key', 'Topico', '5', 1, 'anthropic')).rejects.toThrow(/limite de requisições/);
   });
 
+  it('lança erro se o JSON retornado pelo LLM falhar na validação de estrutura do Zod', async () => {
+    const invalidJson = JSON.stringify([
+      {
+        id: 'q1',
+        questionText: 'Pergunta inválida?',
+        options: ['A', 'B', 'C'], // Apenas 3 opções, viola o limite de 4 do schema
+        correctOptionIndex: 0,
+        explanation: 'Explicação.',
+      },
+    ]);
+    mockFetch.mockResolvedValue(buildSuccessResponse(invalidJson, 'gemini'));
+    await expect(generateQuizQuestions('key', 'Topico', '5', 1, 'gemini')).rejects.toThrow(
+      /falha de validação de estrutura/
+    );
+  });
+
   it('envia diretrizes de exames no prompt se popularExamOnly for true', async () => {
     mockFetch.mockResolvedValue(buildSuccessResponse(VALID_QUESTIONS_JSON, 'gemini'));
     await generateQuizQuestions('key', 'Física Quântica', '5', 4, 'gemini', undefined, true);

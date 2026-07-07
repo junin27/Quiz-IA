@@ -2,9 +2,20 @@ import { supabase } from '../lib/supabaseClient';
 import { CONFIG } from '../config';
 import { encryptApiKey } from '../utils/encryption';
 import type { User } from '../types/user.types';
+import type { ApiKeyInfo } from '../types/apiKey.types';
 import type { RegisterInput, LoginInput } from '../utils/validation';
 import { verifyAccessToken } from '../utils/token';
 import { sessionStore } from './sessionStore';
+
+interface SupabaseAuthUpdate {
+  email?: string;
+  password?: string;
+}
+
+interface ProfileUpdate {
+  name?: string;
+  api_key?: ApiKeyInfo | null;
+}
 
 export class AuthService {
   /** Registra um novo usuário no Supabase Auth */
@@ -90,7 +101,7 @@ export class AuthService {
     token: string;
     user: { id: string; email: string; name: string; emailVerified: boolean };
   }> {
-    const finalName = name?.trim() || 'Jogador Convidado';
+    const finalName = name?.trim() || 'Jogador não informado';
     const finalEmail = email?.trim().toLowerCase() || `guest_${Math.random().toString(36).substring(2, 9)}@feira.local`;
     const dummyPassword = 'FairModePassword123!';
 
@@ -173,7 +184,7 @@ export class AuthService {
   async updateProfile(
     userId: string,
     currentPasswordText: string,
-    input: { name?: string; email?: string; password?: string; apiKey?: any }
+    input: { name?: string; email?: string; password?: string; apiKey?: ApiKeyInfo | null }
   ): Promise<User> {
     // 1. Validar a senha atual antes de permitir alterações sensíveis (Supabase requer reautenticação)
     const { data: userSession } = await supabase.auth.getSession();
@@ -192,7 +203,7 @@ export class AuthService {
 
     // 2. Atualizar dados no Supabase Auth se necessário
     if (input.email || input.password) {
-      const updateData: any = {};
+      const updateData: SupabaseAuthUpdate = {};
       if (input.email) updateData.email = input.email.toLowerCase().trim();
       if (input.password) updateData.password = input.password;
 
@@ -203,7 +214,7 @@ export class AuthService {
     }
 
     // 3. Atualizar dados na tabela profiles
-    const profileUpdate: any = {};
+    const profileUpdate: ProfileUpdate = {};
     if (input.name) profileUpdate.name = input.name.trim();
     if (input.apiKey !== undefined) profileUpdate.api_key = input.apiKey;
 
@@ -225,9 +236,12 @@ export class AuthService {
       .eq('id', userId)
       .single();
 
+    // Obtém o e-mail atualizado se ele foi alterado, senão usa o antigo
+    const finalEmail = input.email ? input.email.toLowerCase().trim() : (userEmail || '');
+
     return {
       id: userId,
-      email: userEmail || '',
+      email: finalEmail,
       passwordHash: '', // Não expomos hashes de senha com Supabase
       name: profile?.name || 'Participante',
       emailVerified: true,

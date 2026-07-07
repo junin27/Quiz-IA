@@ -1,425 +1,32 @@
-import type { QuizQuestion, RagImage } from '../types/quiz.types';
+import { type QuizQuestion, type RagImage, quizQuestionsSchema } from '../types/quiz.types';
 import type { LLMProvider } from '../types/apiKey.types';
+import type { ModelOption } from './llm/types';
+import { OFFLINE_KEY, POPULAR_MODELS, PROVIDER_CONFIGS } from './llm/constants';
+import {
+  buildDifficultyDescription,
+  buildQuizPrompt,
+  buildQuizPromptWithContent,
+  buildBlendedQuizPrompt,
+} from './llm/prompts';
+import {
+  fetchGemini,
+  fetchOpenAIFormat,
+  fetchAnthropic,
+  extractApiError,
+} from './llm/apiClients';
+import {
+  cleanJsonText,
+  parseGeminiResponse,
+  parseOpenAIResponse,
+  parseAnthropicResponse,
+} from './llm/responseParsers';
 
-// ─── Constantes e Defaults ───────────────────────────────────────────────────
+export { OFFLINE_KEY, POPULAR_MODELS, PROVIDER_CONFIGS };
+export type { ModelOption };
 
-export const OFFLINE_KEY = 'mock-key-for-testing';
-
-export interface ModelOption {
-  value: string;
-  label: string;
-}
-
-export const POPULAR_MODELS: Record<LLMProvider, ModelOption[]> = {
-  gemini: [
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Recomendado)' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-    { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
-  ],
-  openai: [
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Recomendado)' },
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'o3-mini', label: 'o3-mini (Raciocínio lógico rápido)' },
-    { value: 'o1', label: 'o1 (Raciocínio avançado)' },
-    { value: 'o1-mini', label: 'o1-mini' },
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  ],
-  anthropic: [
-    { value: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet (Mais inteligente - Híbrido)' },
-    { value: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-    { value: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku' },
-    { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
-  ],
-  deepseek: [
-    { value: 'deepseek-chat', label: 'DeepSeek V3 (Chat)' },
-    { value: 'deepseek-reasoner', label: 'DeepSeek R1 (Raciocínio puro)' },
-    { value: 'deepseek-coder', label: 'DeepSeek Coder' },
-  ],
-  groq: [
-    { value: 'llama-3.3-70b-specdec', label: 'Llama 3.3 70B SpecDec (Recomendado)' },
-    { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versátil' },
-    { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
-    { value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
-    { value: 'gemma2-9b-it', label: 'Gemma 2 9B' },
-  ],
-  mistral: [
-    { value: 'mistral-small-latest', label: 'Mistral Small (Recomendado)' },
-    { value: 'mistral-large-latest', label: 'Mistral Large 2' },
-    { value: 'pixtral-large-latest', label: 'Pixtral Large (Multimodal)' },
-    { value: 'codestral-latest', label: 'Codestral (Programação)' },
-  ],
-  openrouter: [
-    { value: 'openrouter/auto', label: 'Auto (Melhor custo/benefício)' },
-    { value: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (Grátis)' },
-    { value: 'deepseek/deepseek-chat', label: 'DeepSeek V3' },
-    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-    { value: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B Instruct' },
-    { value: 'anthropic/claude-3.7-sonnet', label: 'Claude 3.7 Sonnet' },
-  ],
-};
-
-const PROVIDER_CONFIGS: Record<LLMProvider, { url: string; defaultModel: string }> = {
-  gemini: {
-    url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    defaultModel: 'gemini-2.5-flash', // A URL base do Gemini requer o modelo na URL
-  },
-  openai: {
-    url: 'https://api.openai.com/v1/chat/completions',
-    defaultModel: 'gpt-4o-mini',
-  },
-  anthropic: {
-    url: 'https://api.anthropic.com/v1/messages',
-    defaultModel: 'claude-3-haiku-20240307',
-  },
-  deepseek: {
-    url: 'https://api.deepseek.com/chat/completions',
-    defaultModel: 'deepseek-chat',
-  },
-  groq: {
-    url: 'https://api.groq.com/openai/v1/chat/completions',
-    defaultModel: 'llama3-8b-8192',
-  },
-  mistral: {
-    url: 'https://api.mistral.ai/v1/chat/completions',
-    defaultModel: 'mistral-small-latest',
-  },
-  openrouter: {
-    url: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'openrouter/auto',
-  },
-};
-
-const DIFFICULTY_LABELS: Record<number, string> = {
-  1: 'Muito Fácil', 2: 'Muito Fácil',
-  3: 'Fácil', 4: 'Fácil',
-  5: 'Médio', 6: 'Médio',
-  7: 'Difícil', 8: 'Difícil',
-  9: 'Difícil', 10: 'Muito Difícil',
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildDifficultyDescription(difficulty: string): string {
-  const numericDiff = parseInt(difficulty, 10);
-  if (isNaN(numericDiff)) return difficulty;
-  const label = DIFFICULTY_LABELS[numericDiff] ?? 'Médio';
-  return `${numericDiff}/10 (${label})`;
-}
-
-function buildQuizPrompt(topic: string, difficultyDescription: string, count: number, popularExamOnly: boolean = false): string {
-  if (popularExamOnly) {
-    const examQuestionsCount = Math.ceil(count / 2);
-    const standardQuestionsCount = count - examQuestionsCount;
-
-    return `Gere exatamente ${count} perguntas de quiz exclusivas sobre o tópico "${topic}" com dificuldade "${difficultyDescription}".
-Como a opção de Questões Populares de Provas está ATIVADA, você deve seguir estritamente as regras de divisão abaixo:
-1. Exatamente ${examQuestionsCount} perguntas devem ser questões muito frequentes/populares que costumam cair em provas reais, exames oficiais (como vestibulares, ENEM, concursos públicos ou certificações conhecidas) sobre o tema "${topic}". Para essas perguntas, você DEVE definir obrigatoriamente a propriedade "isPopularExam": true no objeto JSON.
-2. Exatamente ${standardQuestionsCount} perguntas devem ser perguntas normais baseadas em informações relevantes e fatos interessantes sobre o tema "${topic}". Para essas perguntas, você DEVE definir obrigatoriamente a propriedade "isPopularExam": false no objeto JSON.
-
-Misture as perguntas geradas de forma natural.
-Cada pergunta deve conter 4 alternativas e apenas uma resposta correta.
-Retorne APENAS um array JSON válido (sem markdown, sem blocos de código \`\`\`, sem texto adicional) no seguinte formato estruturado:
-[
-  {
-    "id": "string-id-unico",
-    "questionText": "Texto da pergunta aqui",
-    "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
-    "correctOptionIndex": 0,
-    "explanation": "Explicação curta do porquê ser a alternativa correta",
-    "isPopularExam": true
-  }
-]`;
-  }
-
-  return `Gere exatamente ${count} perguntas de quiz exclusivas sobre o tópico "${topic}" com dificuldade "${difficultyDescription}".
-Cada pergunta deve conter 4 alternativas e apenas uma resposta correta.
-Retorne APENAS um array JSON válido (sem markdown, sem blocos de código \`\`\`, sem texto adicional) no seguinte formato estruturado:
-[
-  {
-    "id": "string-id-unico",
-    "questionText": "Texto da pergunta aqui",
-    "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
-    "correctOptionIndex": 0,
-    "explanation": "Explicação curta do porquê ser a alternativa correta"
-  }
-]`;
-}
-
-function buildQuizPromptWithContent(
-  topic: string,
-  difficultyDescription: string,
-  count: number,
-  content: string,
-  popularExamOnly: boolean = false
-): string {
-  const topicFocus = topic.trim()
-    ? `Foque especialmente no seguinte tema ou aspectos específicos: "${topic}".`
-    : `Gere perguntas gerais abrangendo de forma equilibrada todo o conteúdo do material fornecido.`;
-
-  if (popularExamOnly) {
-    const examQuestionsCount = Math.ceil(count / 2);
-    const standardQuestionsCount = count - examQuestionsCount;
-
-    return `Você é um gerador de quiz profissional e bem treinado. Sua tarefa é ler o material de estudo (texto e imagens extraídas) fornecido abaixo e gerar exatamente ${count} perguntas de quiz exclusivas e de altíssima qualidade baseadas estritamente nas informações contidas neste material.
-
-Dificuldade das questões: "${difficultyDescription}".
-${topicFocus}
-
-Como a opção de Questões Populares de Provas está ATIVADA, siga estritamente a divisão de tipos abaixo:
-1. Exatamente ${examQuestionsCount} perguntas devem focar em conceitos fundamentais do material que são recorrentemente cobrados em exames oficiais (como ENEM, vestibulares, concursos públicos ou certificações). Para essas perguntas, defina "isPopularExam": true no JSON.
-2. Exatamente ${standardQuestionsCount} perguntas devem cobrir fatos e detalhes interessantes do material fornecido de forma direta. Para essas perguntas, defina "isPopularExam": false no JSON.
-
-REGRAS DE CONTEXTO E FATO (RAG PROFISSIONAL):
-- Suas perguntas devem ser baseadas APENAS em informações explicitamente contidas no material de contexto abaixo. Não invente ou presuma nada fora do texto.
-- Se houver imagens anexas na mensagem, analise-as como parte do material (gráficos, esquemas, tabelas e diagramas).
-- Cada pergunta deve conter exatamente 4 alternativas e apenas uma resposta correta.
-- A explicação deve referenciar diretamente trechos ou ideias do texto para provar o motivo de aquela alternativa ser a correta.
-
-CONTEÚDO DO MATERIAL DE ESTUDO (CONTEXTO):
-"""
-${content}
-"""
-
-Retorne APENAS um array JSON válido (sem markdown, sem blocos de código \`\`\`, sem texto adicional) no seguinte formato estruturado:
-[
-  {
-    "id": "string-id-unico",
-    "questionText": "Texto da pergunta aqui",
-    "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
-    "correctOptionIndex": 0,
-    "explanation": "Explicação detalhada referenciando o material de estudo",
-    "isPopularExam": true
-  }
-]`;
-  }
-
-  return `Você é um gerador de quiz profissional e bem treinado. Sua tarefa é ler o material de estudo (texto e imagens extraídas) fornecido abaixo e gerar exatamente ${count} perguntas de quiz exclusivas e de altíssima qualidade baseadas estritamente nas informações contidas neste material.
-
-Dificuldade das questões: "${difficultyDescription}".
-${topicFocus}
-
-REGRAS DE CONTEXTO E FATO (RAG PROFISSIONAL):
-- Suas perguntas devem ser baseadas APENAS em informações explicitamente contidas no material de contexto abaixo. Não invente ou presuma nada fora do texto.
-- Se houver imagens anexas na mensagem, analise-as como parte do material (gráficos, esquemas, tabelas e diagramas).
-- Cada pergunta deve conter exatamente 4 alternativas e apenas uma resposta correta.
-- A explicação deve referenciar diretamente trechos ou ideias do texto para provar o motivo de aquela alternativa ser a correta.
-
-CONTEÚDO DO MATERIAL DE ESTUDO (CONTEXTO):
-"""
-${content}
-"""
-
-Retorne APENAS um array JSON válido (sem markdown, sem blocos de código \`\`\`, sem texto adicional) no seguinte formato estruturado:
-[
-  {
-    "id": "string-id-unico",
-    "questionText": "Texto da pergunta aqui",
-    "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
-    "correctOptionIndex": 0,
-    "explanation": "Explicação detalhada referenciando o material de estudo"
-  }
-]`;
-}
-
-interface ApiErrorBody {
-  error?: {
-    message?: string;
-    status?: string;
-    type?: string;
-    code?: string;
-  };
-}
-
-async function extractApiError(response: Response, provider: LLMProvider): Promise<string> {
-  let body: ApiErrorBody = {};
-  try {
-    body = (await response.json()) as ApiErrorBody;
-  } catch {
-    // Se não for JSON, segue a vida
-  }
-
-  const apiMessage = body.error?.message ?? response.statusText;
-  const apiStatus = body.error?.status ?? body.error?.code ?? body.error?.type ?? '';
-
-  // Mensagens comuns da API do Google (Gemini)
-  if (provider === 'gemini') {
-    const statusMessages: Record<string, string> = {
-      INVALID_ARGUMENT: `Chave de API com formato inválido. Verifique se ela começa com "AIza". (Detalhe: ${apiMessage})`,
-      UNAUTHENTICATED: `Chave de API não reconhecida pela Google. (Detalhe: ${apiMessage})`,
-      PERMISSION_DENIED: `Sua chave não tem permissão para usar este modelo. (Detalhe: ${apiMessage})`,
-      RESOURCE_EXHAUSTED: `Cota da API esgotada. (Detalhe: ${apiMessage})`,
-      NOT_FOUND: `Modelo não disponível para esta chave ou região. (Detalhe: ${apiMessage})`,
-    };
-    if (statusMessages[apiStatus]) return statusMessages[apiStatus]!;
-  }
-
-  // Fallback genérico para os outros provedores (que costumam retornar mensagens boas no erro)
-  if (response.status === 401) {
-    return `Chave de API inválida ou revogada. Verifique suas credenciais na plataforma do provedor. (Detalhe: ${apiMessage})`;
-  }
-  if (response.status === 403) {
-    return `Sua chave não tem permissão para acessar este modelo ou recurso. (Detalhe: ${apiMessage})`;
-  }
-  if (response.status === 429) {
-    return `Cota da API esgotada ou limite de requisições atingido. Aguarde e tente novamente. (Detalhe: ${apiMessage})`;
-  }
-  if (response.status === 404) {
-    return `Modelo não encontrado. Verifique se o nome do modelo digitado está correto. (Detalhe: ${apiMessage})`;
-  }
-
-  return `Erro da API do provedor (HTTP ${response.status} — ${apiStatus || response.statusText}): ${apiMessage}`;
-}
-
-/** Limpa marcadores Markdown em volta de JSON (comum quando o LLM ignora a instrução) */
-function cleanJsonText(text: string): string {
-  let cleaned = text.trim();
-  if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json/, '');
-  else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```/, '');
-  if (cleaned.endsWith('```')) cleaned = cleaned.replace(/```$/, '');
-  return cleaned.trim();
-}
-
-// ─── Adapters de Requisição por Família de API ────────────────────────────────
-
-async function fetchGemini(
-  apiKey: string,
-  modelId: string,
-  prompt: string,
-  images: RagImage[] = []
-) {
-  const url = `${PROVIDER_CONFIGS.gemini.url}/${modelId}:generateContent?key=${apiKey}`;
-  const parts: any[] = [{ text: prompt }];
-
-  if (images && images.length > 0) {
-    images.forEach((img) => {
-      parts.push({
-        inlineData: {
-          mimeType: img.mimeType,
-          data: img.base64Data,
-        },
-      });
-    });
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
-    }),
-  });
-  return response;
-}
-
-async function fetchOpenAIFormat(
-  provider: LLMProvider,
-  apiKey: string,
-  modelId: string,
-  prompt: string,
-  images: RagImage[] = []
-) {
-  const url = PROVIDER_CONFIGS[provider].url;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
-  };
-
-  if (provider === 'openrouter') {
-    headers['HTTP-Referer'] = window.location.origin;
-    headers['X-Title'] = 'Quiz LLM App';
-  }
-
-  let messageContent: any = prompt;
-  if (images && images.length > 0) {
-    messageContent = [
-      { type: 'text', text: prompt },
-      ...images.map((img) => ({
-        type: 'image_url',
-        image_url: {
-          url: `data:${img.mimeType};base64,${img.base64Data}`,
-        },
-      })),
-    ];
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: modelId,
-      messages: [{ role: 'user', content: messageContent }],
-      temperature: 0.7,
-    }),
-  });
-  return response;
-}
-
-async function fetchAnthropic(
-  apiKey: string,
-  modelId: string,
-  prompt: string,
-  images: RagImage[] = []
-) {
-  const url = PROVIDER_CONFIGS.anthropic.url;
-  let messageContent: any = prompt;
-
-  if (images && images.length > 0) {
-    messageContent = [
-      { type: 'text', text: prompt },
-      ...images.map((img) => ({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: img.mimeType,
-          data: img.base64Data,
-        },
-      })),
-    ];
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: 2000,
-      temperature: 0.7,
-      messages: [{ role: 'user', content: messageContent }],
-    }),
-  });
-  return response;
-}
-
-// ─── Extratores de Texto por Família de API ───────────────────────────────────
-
-function parseGeminiResponse(json: any): string {
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
-  return text;
-}
-
-function parseOpenAIResponse(json: any): string {
-  const text = json.choices?.[0]?.message?.content;
-  if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
-  return text;
-}
-
-function parseAnthropicResponse(json: any): string {
-  const text = json.content?.[0]?.text;
-  if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
-  return text;
-}
-
-// ─── Exports Públicos ─────────────────────────────────────────────────────────
-
+/**
+ * Valida a chave de API testando uma chamada simples ao provedor.
+ */
 export async function validateApiKey(
   apiKey: string,
   provider: LLMProvider = 'gemini',
@@ -431,31 +38,20 @@ export async function validateApiKey(
   const prompt = 'Responda apenas OK';
 
   try {
-    let response: Response;
-    if (provider === 'gemini') {
-      response = await fetchGemini(apiKey, modelId, prompt);
-    } else if (provider === 'anthropic') {
-      response = await fetchAnthropic(apiKey, modelId, prompt);
-    } else {
-      response = await fetchOpenAIFormat(provider, apiKey, modelId, prompt);
-    }
-
+    const response = await executeValidationRequest(provider, apiKey, modelId, prompt);
     if (!response.ok) {
       const specificError = await extractApiError(response, provider);
       return { valid: false, error: specificError };
     }
     return { valid: true };
   } catch (err: unknown) {
-    if (err instanceof Error && err.message.length > 20) {
-      return { valid: false, error: err.message };
-    }
-    return {
-      valid: false,
-      error: 'Não foi possível conectar à API. Verifique sua conexão com a internet.',
-    };
+    return handleValidationError(err);
   }
 }
 
+/**
+ * Orquestra e gera as questões do quiz a partir de um provedor de IA ou RAG.
+ */
 export async function generateQuizQuestions(
   apiKey: string,
   topic: string,
@@ -464,35 +60,135 @@ export async function generateQuizQuestions(
   provider: LLMProvider = 'gemini',
   customModelId?: string,
   popularExamOnly: boolean = false,
-  ragData?: { text: string; images: RagImage[] }
+  ragData?: { text: string; images: RagImage[] },
+  percentages?: { ia: number; rag: number; exam: number }
 ): Promise<QuizQuestion[]> {
+  validateInput(apiKey);
+
+  const modelId = resolveModelId(provider, customModelId);
+  const difficultyDescription = buildDifficultyDescription(difficulty);
+  const prompt = resolvePrompt(topic, difficultyDescription, count, popularExamOnly, ragData, percentages);
+  const images = ragData?.images || [];
+
+  const response = await sendRequest(provider, apiKey, modelId, prompt, images);
+  const rawText = await handleResponse(response, provider);
+  return parseQuizResult(rawText);
+}
+
+// ─── Funções Auxiliares Internas ──────────────────────────────────────────────
+
+async function executeValidationRequest(
+  provider: LLMProvider,
+  apiKey: string,
+  modelId: string,
+  prompt: string
+): Promise<Response> {
+  if (provider === 'gemini') {
+    return fetchGemini(apiKey, modelId, prompt);
+  }
+  if (provider === 'anthropic') {
+    return fetchAnthropic(apiKey, modelId, prompt);
+  }
+  return fetchOpenAIFormat(provider, apiKey, modelId, prompt);
+}
+
+function handleValidationError(err: unknown): { valid: boolean; error: string } {
+  if (err instanceof Error && err.message.length > 20) {
+    return { valid: false, error: err.message };
+  }
+  return {
+    valid: false,
+    error: 'Não foi possível conectar à API. Verifique sua conexão com a internet.',
+  };
+}
+
+function validateInput(apiKey: string): void {
   if (!apiKey || apiKey === OFFLINE_KEY) {
     throw new Error(
       'Modo Offline ativo: configure uma Chave de API válida em "Minha Conta" para gerar questões reais.'
     );
   }
+}
 
-  const modelId = customModelId?.trim() || PROVIDER_CONFIGS[provider].defaultModel;
-  const difficultyDescription = buildDifficultyDescription(difficulty);
-  
-  const prompt = ragData
+function resolveModelId(provider: LLMProvider, customModelId?: string): string {
+  return customModelId?.trim() || PROVIDER_CONFIGS[provider].defaultModel;
+}
+
+function resolvePrompt(
+  topic: string,
+  difficultyDescription: string,
+  count: number,
+  popularExamOnly: boolean,
+  ragData?: { text: string; images: RagImage[] },
+  percentages?: { ia: number; rag: number; exam: number }
+): string {
+  if (percentages) {
+    const counts = calculateBlendCounts(count, percentages, !!ragData);
+    return buildBlendedQuizPrompt(topic, difficultyDescription, count, counts, ragData?.text);
+  }
+  return ragData
     ? buildQuizPromptWithContent(topic, difficultyDescription, count, ragData.text, popularExamOnly)
     : buildQuizPrompt(topic, difficultyDescription, count, popularExamOnly);
-  const images = ragData?.images || [];
+}
 
-  let response: Response;
+function getActiveKeys(
+  pct: { ia: number; rag: number; exam: number },
+  hasRag: boolean
+): { keys: Array<'ia' | 'rag' | 'exam'>; pct: { ia: number; rag: number; exam: number } } {
+  const keys: Array<'ia' | 'rag' | 'exam'> = [];
+  if (pct.ia > 0) keys.push('ia');
+  if (pct.rag > 0 && hasRag) keys.push('rag');
+  if (pct.exam > 0) keys.push('exam');
+
+  const copy = { ...pct };
+  if (keys.length === 0) {
+    keys.push('ia');
+    copy.ia = 100;
+  }
+  return { keys, pct: copy };
+}
+
+function calculateBlendCounts(
+  count: number,
+  percentages: { ia: number; rag: number; exam: number },
+  hasRagData: boolean
+): { ia: number; rag: number; exam: number } {
+  const active = getActiveKeys(percentages, hasRagData);
+  const counts = { ia: 0, rag: 0, exam: 0 };
+  let sum = 0;
+  active.keys.forEach((key, index) => {
+    if (index === active.keys.length - 1) {
+      counts[key] = count - sum;
+    } else {
+      const val = Math.round((active.pct[key] / 100) * count);
+      counts[key] = val;
+      sum += val;
+    }
+  });
+  return counts;
+}
+
+async function sendRequest(
+  provider: LLMProvider,
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  images: RagImage[]
+): Promise<Response> {
   try {
     if (provider === 'gemini') {
-      response = await fetchGemini(apiKey, modelId, prompt, images);
-    } else if (provider === 'anthropic') {
-      response = await fetchAnthropic(apiKey, modelId, prompt, images);
-    } else {
-      response = await fetchOpenAIFormat(provider, apiKey, modelId, prompt, images);
+      return await fetchGemini(apiKey, modelId, prompt, images);
     }
-  } catch {
+    if (provider === 'anthropic') {
+      return await fetchAnthropic(apiKey, modelId, prompt, images);
+    }
+    return await fetchOpenAIFormat(provider, apiKey, modelId, prompt, images);
+  } catch (err: unknown) {
     throw new Error('Falha na comunicação com a API. Verifique sua conexão.');
   }
+}
 
+async function handleResponse(response: Response, provider: LLMProvider): Promise<string> {
   if (response.status === 429) {
     const rateDetail = await extractApiError(response, provider);
     throw new Error(
@@ -505,28 +201,20 @@ export async function generateQuizQuestions(
     throw new Error(specificError);
   }
 
-  const responseJson: any = await response.json();
-  let rawText = '';
+  const responseJson: unknown = await response.json();
+  if (provider === 'gemini') return parseGeminiResponse(responseJson);
+  if (provider === 'anthropic') return parseAnthropicResponse(responseJson);
+  return parseOpenAIResponse(responseJson);
+}
 
-  try {
-    if (provider === 'gemini') {
-      rawText = parseGeminiResponse(responseJson);
-    } else if (provider === 'anthropic') {
-      rawText = parseAnthropicResponse(responseJson);
-    } else {
-      rawText = parseOpenAIResponse(responseJson);
-    }
-  } catch (err) {
-    throw err; // Relança o erro de "resposta vazia"
-  }
-
+function parseQuizResult(rawText: string): QuizQuestion[] {
   const cleanText = cleanJsonText(rawText);
-
   try {
-    return JSON.parse(cleanText) as QuizQuestion[];
-  } catch {
+    const parsed = JSON.parse(cleanText);
+    return quizQuestionsSchema.parse(parsed);
+  } catch (err: unknown) {
     throw new Error(
-      'A IA retornou dados em formato inesperado. Tente novamente com um tema diferente.'
+      'A IA retornou dados em formato inesperado (falha de validação de estrutura). Tente novamente com um tema diferente.'
     );
   }
 }

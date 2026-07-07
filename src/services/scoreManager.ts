@@ -1,21 +1,11 @@
 import type { DifficultyLevel, Score, QuizQuestion, QuizAnswer } from '../types/quiz.types';
 import { calculateQuestionScore } from './quizLogic';
-import { supabase } from '../lib/supabaseClient';
-
-/**
- * Obtém os cabeçalhos de autorização contendo o JWT do Supabase Auth.
- */
-async function getAuthHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
+import { getAuthHeader } from '../lib/authHeader';
 
 /**
  * Registra o quiz gerado na tabela `quizzes` do Supabase para persistência e compartilhamento.
  */
 export async function saveQuizQuestions(
-  _userId: string,
   topic: string,
   difficulty: DifficultyLevel,
   questions: QuizQuestion[]
@@ -47,7 +37,6 @@ export async function saveQuizQuestions(
  * Cria e persiste um registro de pontuação/tentativa no Supabase.
  */
 export async function saveQuizResult(
-  _userId: string,
   quizId: string,
   roomId: string | undefined,
   topic: string,
@@ -115,7 +104,7 @@ export async function saveQuizResult(
 /**
  * Busca o histórico de tentativas do usuário
  */
-export async function getUserAttempts(_userId: string): Promise<(Score & { quizQuestions: QuizQuestion[] })[]> {
+export async function getUserAttempts(): Promise<(Score & { quizQuestions: QuizQuestion[] })[]> {
   const authHeader = await getAuthHeader();
   const response = await fetch('/api/attempts/history', {
     method: 'GET',
@@ -134,7 +123,7 @@ export async function getUserAttempts(_userId: string): Promise<(Score & { quizQ
 /**
  * Busca estatísticas agregadas privadas do usuário
  */
-export async function getUserStats(_userId: string): Promise<{
+export async function getUserStats(): Promise<{
   totalQuizzesPlayed: number;
   highestScore: number;
   lowestScore: number;

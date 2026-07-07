@@ -13,7 +13,6 @@ import {
   CheckCircle2, 
   XCircle, 
   Calendar,
-  Zap,
   Target
 } from 'lucide-react';
 
@@ -46,6 +45,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
   // Filtros de histórico
   const [topicFilter, setTopicFilter] = useState('');
   const [diffFilter, setDiffFilter] = useState<DifficultyLevel | ''>('');
+  const [isDiffOpen, setIsDiffOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -55,8 +55,8 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
     setLoading(true);
     try {
       const [userAttempts, userStats] = await Promise.all([
-        getUserAttempts(currentUser.id),
-        getUserStats(currentUser.id)
+        getUserAttempts(),
+        getUserStats()
       ]);
       setAttempts(userAttempts);
       setStats(userStats);
@@ -152,16 +152,64 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           </div>
           <div>
             <label className="block text-slate-400 mb-1.5 font-bold uppercase tracking-wider text-[10px]">Dificuldade</label>
-            <select
-              value={diffFilter}
-              onChange={(e) => setDiffFilter(e.target.value as any)}
-              className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800/80 rounded-xl text-slate-200 outline-none focus:border-rose-500 transition-colors"
-            >
-              <option value="">Todas as dificuldades</option>
-              <option value="easy">Fácil</option>
-              <option value="medium">Médio</option>
-              <option value="hard">Difícil</option>
-            </select>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsDiffOpen(!isDiffOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-950/60 border border-slate-800/80 rounded-xl text-slate-200 outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all text-left"
+              >
+                <span>
+                  {diffFilter === '' && 'Todas as dificuldades'}
+                  {diffFilter === 'easy' && 'Fácil'}
+                  {diffFilter === 'medium' && 'Médio'}
+                  {diffFilter === 'hard' && 'Difícil'}
+                </span>
+                <svg 
+                  className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isDiffOpen ? 'rotate-180 text-rose-500' : ''}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isDiffOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setIsDiffOpen(false)} />
+                  <div className="absolute left-0 right-0 mt-1.5 bg-slate-950/95 border border-slate-800 rounded-xl shadow-xl overflow-hidden z-20 backdrop-blur-md">
+                    <button
+                      type="button"
+                      onClick={() => { setDiffFilter(''); setIsDiffOpen(false); }}
+                      className={`w-full px-4 py-2.5 text-left text-xs transition-colors hover:bg-slate-900/60 ${diffFilter === '' ? 'text-rose-400 font-bold bg-rose-500/5' : 'text-slate-300'}`}
+                    >
+                      Todas as dificuldades
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setDiffFilter('easy'); setIsDiffOpen(false); }}
+                      className={`w-full px-4 py-2.5 text-left text-xs transition-colors hover:bg-slate-900/60 border-t border-slate-900/40 ${diffFilter === 'easy' ? 'text-rose-400 font-bold bg-rose-500/5' : 'text-slate-300'}`}
+                    >
+                      Fácil
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setDiffFilter('medium'); setIsDiffOpen(false); }}
+                      className={`w-full px-4 py-2.5 text-left text-xs transition-colors hover:bg-slate-900/60 border-t border-slate-900/40 ${diffFilter === 'medium' ? 'text-rose-400 font-bold bg-rose-500/5' : 'text-slate-300'}`}
+                    >
+                      Médio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setDiffFilter('hard'); setIsDiffOpen(false); }}
+                      className={`w-full px-4 py-2.5 text-left text-xs transition-colors hover:bg-slate-900/60 border-t border-slate-900/40 ${diffFilter === 'hard' ? 'text-rose-400 font-bold bg-rose-500/5' : 'text-slate-300'}`}
+                    >
+                      Difícil
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -298,7 +346,10 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
       {/* Ações */}
       <div className="flex justify-center pt-2">
         <Button onClick={onBackToSetup} className="w-full md:w-auto flex items-center justify-center gap-2">
-          <Zap size={14} />
+          <svg className="w-3.5 h-3.5 text-current shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M 7 8.5 C 7 4.5, 17 4.5, 17 8.5 C 17 12.5, 12 12, 12 16" />
+            <circle cx="12" cy="20.5" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
           Jogar Novo Quiz
         </Button>
       </div>

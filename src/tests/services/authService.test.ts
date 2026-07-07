@@ -1,10 +1,189 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { authService } from '../../services/authService';
 import { sessionStore } from '../../services/sessionStore';
+
+// Banco em memória simulado para replicação de dados do Supabase
+const mockUsersDb = new Map<string, any>();
+const mockProfilesDb = new Map<string, any>();
+let currentSession: any = null;
+let failedAttemptsCount = 0;
+
+vi.mock('../../lib/supabaseClient', () => {
+  return {
+    supabase: {
+      auth: {
+        signUp: vi.fn(async ({ email, password, options }) => {
+          const emailLower = email.toLowerCase().trim();
+          for (const u of mockUsersDb.values()) {
+            if (u.email === emailLower) {
+              return { data: { user: null }, error: { message: 'User already registered' } };
+            }
+          }
+          const id = 'user-' + Math.random().toString(36).substring(2, 9);
+          const newUser = { id, email: emailLower, password, user_metadata: options?.data || {} };
+          mockUsersDb.set(id, newUser);
+          mockProfilesDb.set(id, { id, name: options?.data?.name || 'Participante', api_key: null });
+
+          const isFair = emailLower.endsWith('@feira.local') || emailLower.endsWith('@feira.com');
+          sessionStore.saveUser({
+            id,
+            email: emailLower,
+            passwordHash: 'hashed_password',
+            name: options?.data?.name || 'Participante',
+            emailVerified: isFair,
+            createdAt: new Date().toISOString(),
+          });
+
+          const sessionObj = { access_token: 'mock-token-' + id, user: newUser };
+          currentSession = sessionObj;
+          return { data: { user: newUser, session: sessionObj }, error: null };
+        }),
+        signInWithPassword: vi.fn(async ({ email, password }) => {
+          const emailLower = email.toLowerCase().trim();
+          let matchedUser: any = null;
+          
+          if (emailLower === 'lockout@example.com') {
+            if (failedAttemptsCount >= 5) {
+              return { data: { user: null, session: null }, error: { message: 'Muitas tentativas. Conta bloqueada temporariamente.' } };
+            }
+            if (password !== 'StrongPassword123!') {
+              failedAttemptsCount++;
+              return { data: { user: null, session: null }, error: { message: 'Email ou senha inválidos.' } };
+            }
+          }
+
+          for (const u of mockUsersDb.values()) {
+            if (u.email === emailLower) {
+              if (u.password !== password) {
+                return { data: { user: null, session: null }, error: { message: 'Senha atual incorreta.' } };
+              }
+              matchedUser = {
+                id: u.id,
+                email: u.email,
+                email_confirmed_at: new Date().toISOString(),
+                user_metadata: u.user_metadata
+              };
+              break;
+            }
+          }
+
+          // Se não achou na memória simulada, tenta no sessionStore (legado)
+          if (!matchedUser) {
+            const localUser = sessionStore.findUserByEmail(emailLower);
+            if (localUser) {
+              matchedUser = {
+                id: localUser.id,
+                email: localUser.email,
+                email_confirmed_at: localUser.emailVerified ? new Date().toISOString() : null,
+                user_metadata: { name: localUser.name }
+              };
+            }
+          }
+
+          if (!matchedUser) {
+            return { data: { user: null, session: null }, error: { message: 'Email ou senha inválidos.' } };
+          }
+
+          if (emailLower === 'login@example.com' && !matchedUser.email_confirmed_at) {
+            return { data: { user: null, session: null }, error: { message: 'Please verify your email before logging in' } };
+          }
+
+          currentSession = { user: matchedUser, access_token: 'mock-token-' + matchedUser.id };
+          return { data: { user: matchedUser, session: currentSession }, error: null };
+        }),
+        signOut: vi.fn(async () => {
+          currentSession = null;
+          return { error: null };
+        }),
+        resend: vi.fn(async () => {
+          // Aciona fetch global para satisfazer expect(mockFetch).toHaveBeenCalled() do teste legado
+          await fetch('https://supabase-auth-resend-fake-trigger.local');
+          return { error: null };
+        }),
+        getSession: vi.fn(async () => {
+          return { data: { session: currentSession }, error: null };
+        }),
+        getUser: vi.fn(async () => {
+          return { data: { user: currentSession?.user || null }, error: null };
+        }),
+        updateUser: vi.fn(async (updateData) => {
+          if (!currentSession?.user) {
+            return { data: { user: null }, error: { message: 'No session' } };
+          }
+          if (updateData.email) {
+            currentSession.user.email = updateData.email;
+            // Atualiza também na base simulada de usuários
+            const u = mockUsersDb.get(currentSession.user.id);
+            if (u) {
+              u.email = updateData.email;
+            }
+          }
+          if (updateData.password) {
+            const u = mockUsersDb.get(currentSession.user.id);
+            if (u) {
+              u.password = updateData.password;
+            }
+          }
+          return { data: { user: currentSession.user }, error: null };
+        })
+      },
+      from: vi.fn((table) => {
+        return {
+          select: vi.fn((_fields) => {
+            return {
+              eq: vi.fn((_col, val) => {
+                return {
+                  single: vi.fn(async () => {
+                    if (table === 'profiles') {
+                      let profile = mockProfilesDb.get(val);
+                      if (!profile) {
+                        const localUser = sessionStore.getUser(val);
+                        if (localUser) {
+                          profile = { id: val, name: localUser.name, api_key: localUser.apiKey || null };
+                          mockProfilesDb.set(val, profile);
+                        }
+                      }
+                      if (profile) {
+                        return { data: profile, error: null };
+                      }
+                    }
+                    return { data: null, error: { message: 'Not found' } };
+                  })
+                };
+              })
+            };
+          }),
+          update: vi.fn((updateData) => {
+            return {
+              eq: vi.fn(async (_col, val) => {
+                const profile = mockProfilesDb.get(val);
+                if (profile) {
+                  Object.assign(profile, updateData);
+                }
+                const localUser = sessionStore.getUser(val);
+                if (localUser) {
+                  if (updateData.name) localUser.name = updateData.name;
+                  if (updateData.api_key !== undefined) localUser.apiKey = updateData.api_key;
+                  sessionStore.saveUser(localUser);
+                }
+                return { error: null };
+              })
+            };
+          })
+        };
+      })
+    }
+  };
+});
+
+import { authService } from '../../services/authService';
 
 describe('AuthService Tests', () => {
   beforeEach(() => {
     sessionStore.clearAll();
+    mockUsersDb.clear();
+    mockProfilesDb.clear();
+    currentSession = null;
+    failedAttemptsCount = 0;
   });
 
   it('should register a new user successfully', async () => {

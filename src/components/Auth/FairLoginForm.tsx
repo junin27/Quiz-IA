@@ -63,7 +63,9 @@ export const FairLoginForm: React.FC<FairLoginFormProps> = ({
       <div className="absolute -top-10 -right-10 w-40 h-40 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      <h2 className="text-2xl font-extrabold text-white text-center mb-1">Bem-vindo ao Quiz!</h2>
+      <h2 className="text-2xl font-extrabold text-white text-center mb-1">
+        Bem-vindo ao <span className="text-red-500">Quest</span><span className="text-orange-500">AI</span>!
+      </h2>
       <p className="text-slate-400 text-xs text-center mb-6 leading-relaxed">
         Preencha os campos abaixo para iniciar. Ambos são opcionais!
       </p>

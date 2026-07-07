@@ -1,18 +1,9 @@
-import { supabase } from '../lib/supabaseClient';
+import { getAuthHeader } from '../lib/authHeader';
 import type { Room, RoomMember, RoomStats, QuizQuestion } from '../types/quiz.types';
-
-/**
- * Obtém os cabeçalhos de autorização contendo o JWT do Supabase Auth.
- */
-async function getAuthHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
 
 export class RoomService {
   /** Cria uma sala de quiz */
-  async createRoom(_ownerId: string): Promise<Room> {
+  async createRoom(): Promise<Room> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/create', {
       method: 'POST',
@@ -31,7 +22,7 @@ export class RoomService {
   }
 
   /** Entra em uma sala por meio do código */
-  async joinRoom(code: string, _userId: string): Promise<Room> {
+  async joinRoom(code: string): Promise<Room> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/join', {
       method: 'POST',
@@ -86,8 +77,7 @@ export class RoomService {
   async updateMemberRole(
     roomId: string,
     targetUserId: string,
-    newRole: 'leader' | 'member',
-    _actingUserId: string
+    newRole: 'leader' | 'member'
   ): Promise<void> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/members', {
@@ -113,8 +103,7 @@ export class RoomService {
   async updateMemberStatus(
     roomId: string,
     targetUserId: string,
-    newStatus: 'active' | 'absent',
-    _actingUserId: string
+    newStatus: 'active' | 'absent'
   ): Promise<void> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/members', {
@@ -165,8 +154,7 @@ export class RoomService {
     roomId: string,
     topic: string,
     difficulty: string,
-    questions: QuizQuestion[],
-    _actingUserId: string
+    questions: QuizQuestion[]
   ): Promise<string> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/quiz', {
@@ -194,7 +182,7 @@ export class RoomService {
   }
 
   /** Finaliza o quiz ativo na sala */
-  async endRoomQuiz(roomId: string, _actingUserId: string): Promise<void> {
+  async endRoomQuiz(roomId: string): Promise<void> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/quiz', {
       method: 'POST',
@@ -231,7 +219,7 @@ export class RoomService {
   }
 
   /** Retorna a lista de salas em que o usuário está ativo no momento */
-  async getUserRooms(_userId: string): Promise<Room[]> {
+  async getUserRooms(): Promise<Room[]> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/list', {
       method: 'GET',

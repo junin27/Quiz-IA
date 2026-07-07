@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import { handleCors } from './_lib/corsMiddleware';
+import { handleRateLimit } from './_lib/rateLimitMiddleware';
 
 interface VercelRequest extends IncomingMessage {
   body: any;
@@ -13,23 +15,8 @@ interface VercelResponse extends ServerResponse {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS Headers seguros - reflete a origem de forma segura
-  const origin = req.headers.origin || '';
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
+  if (handleCors(req, res)) return;
+  if (handleRateLimit(req, res)) return;
 
   if (req.method !== 'POST') {
     res.writeHead(405, { 'Content-Type': 'application/json' });

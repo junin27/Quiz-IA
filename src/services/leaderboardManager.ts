@@ -1,16 +1,25 @@
+import bcrypt from 'bcryptjs';
 import { sessionStore } from './sessionStore';
 import { CONFIG } from '../config';
 import type { LeaderboardEntry, DifficultyLevel } from '../types/quiz.types';
 import type { AdminLog } from '../types/storage.types';
 
-const ADMIN_PASSWORD_HASH = '16175223c8ddce5ace0493c948569c211b03c4c6bb3d3e484434999448cffe01'; // SHA-256 of "admin-secret"
-const RESET_SPAM_WINDOW_MS = 60 * 60 * 1000; // 1 hour in ms
+const RESET_SPAM_WINDOW_MS = 60 * 60 * 1000; // 1 hora em ms
 
-async function computeSha256(text: string): Promise<string> {
-  const msgBuffer = new TextEncoder().encode(text);
-  const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+/**
+ * Compara a senha fornecida com o hash bcrypt armazenado no ambiente.
+ * Lança erro se VITE_ADMIN_PASSWORD_HASH não estiver configurado.
+ */
+async function verifyAdminPassword(password: string): Promise<boolean> {
+  const hash = import.meta.env.VITE_ADMIN_PASSWORD_HASH ?? '';
+  if (!hash) {
+    throw new Error(
+      'VITE_ADMIN_PASSWORD_HASH não está configurado no ambiente. '
+      + 'Gere um hash bcrypt com `node -e "const b=require(\'bcryptjs\'); b.hash(\'sua-senha\',10).then(console.log)"` '
+      + 'e adicione ao .env.'
+    );
+  }
+  return bcrypt.compare(password, hash);
 }
 
 export function maskUserName(fullName: string): string {
@@ -29,8 +38,8 @@ export function maskUserName(fullName: string): string {
  * ```
  */
 export async function tryResetLeaderboard(password: string): Promise<boolean> {
-  const hash = await computeSha256(password);
-  if (hash !== ADMIN_PASSWORD_HASH) {
+  const isValid = await verifyAdminPassword(password);
+  if (!isValid) {
     throw new Error('Senha administrativa inválida.');
   }
 

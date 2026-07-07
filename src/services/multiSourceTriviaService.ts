@@ -22,7 +22,7 @@ class MultiSourceTriviaService {
   private categoriesCache: Map<string, CategoryWithProviders> = new Map();
   private categoryIdMap: Map<string, Map<TriviaBankProvider, string>> = new Map();
   private cacheTimestamp = 0;
-  private CACHE_DURATION = 3600000; // 1 hora
+  private CACHE_DURATION = 60 * 60 * 1000; // 1 hora em ms
 
   constructor() {
     this.providers = new Map();

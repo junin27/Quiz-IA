@@ -3,6 +3,7 @@ import { multiSourceTriviaService } from '../services/multiSourceTriviaService';
 import type {
   CategoryWithProviders,
   TriviaBankQuestion,
+  TriviaBankArea,
 } from '../types/triviaBanks.types';
 
 interface UseMultiSourceTriviaReturn {
@@ -10,7 +11,7 @@ interface UseMultiSourceTriviaReturn {
   isLoadingCategories: boolean;
   selectedCategory: CategoryWithProviders | null;
   selectedAreaIds: string[];
-  availableAreas: any[];
+  availableAreas: TriviaBankArea[];
   selectCategory: (categoryId: string) => void;
   selectArea: (areaId: string, isSelected: boolean) => void;
   clearSelectedAreas: () => void;

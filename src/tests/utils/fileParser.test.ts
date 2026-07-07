@@ -163,6 +163,9 @@ describe('fileParser utils', () => {
       const file = new File([new ArrayBuffer(100)], 'test.pdf');
       
       const mockPdfJs = {
+        GlobalWorkerOptions: {
+          workerSrc: ''
+        },
         getDocument: vi.fn().mockReturnValue({
           promise: Promise.resolve({
             numPages: 2,

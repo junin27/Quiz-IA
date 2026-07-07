@@ -1,5 +1,6 @@
 import { BaseTriviaBankProvider } from './baseProvider';
 import { translateText } from '../translationService';
+import { mapDifficultyScaleToNumber } from '../triviaService';
 import type {
   TriviaBankCategory,
   TriviaBankQuestion,
@@ -112,7 +113,7 @@ export class TheTriviaApiProvider extends BaseTriviaBankProvider {
           categoryId: options.categoryId,
           areaId: options.areaIds?.[0],
           areaName: options.areaIds && options.areaIds.length > 0 ? this.extractAreaName(q.tags) : undefined,
-          difficulty: this.mapTheTriviaApiDifficulty(q.difficulty),
+          difficulty: mapDifficultyScaleToNumber(q.difficulty),
           explanation: `A resposta correta é: "${q.correctAnswer}".`,
         };
       });
@@ -170,13 +171,5 @@ export class TheTriviaApiProvider extends BaseTriviaBankProvider {
 
   private extractAreaName(tags: string[]): string {
     return tags && tags.length > 0 ? tags[0] : 'General';
-  }
-
-  private mapTheTriviaApiDifficulty(difficulty: string): string {
-    const lower = difficulty.toLowerCase();
-    if (lower === 'easy') return '3';
-    if (lower === 'medium') return '5';
-    if (lower === 'hard') return '7';
-    return '5';
   }
 }

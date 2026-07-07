@@ -1,14 +1,18 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getLeaderboard, tryResetLeaderboard, maskUserName } from '../../services/leaderboardManager';
 import { sessionStore } from '../../services/sessionStore';
 import { CONFIG } from '../../config';
 import type { User } from '../../types/user.types';
 import type { Score } from '../../types/quiz.types';
 
+import bcrypt from 'bcryptjs';
+
 describe('LeaderboardManager Tests', () => {
   beforeEach(() => {
     sessionStore.clearAll();
     CONFIG.FAIR_MODE = false;
+    const testHash = bcrypt.hashSync('admin-secret', 10);
+    vi.stubEnv('VITE_ADMIN_PASSWORD_HASH', testHash);
   });
 
   it('should mask user name correctly', () => {
@@ -63,6 +67,7 @@ describe('LeaderboardManager Tests', () => {
     const activeBefore = sessionStore.getAllScores();
     expect(activeBefore.length).toBe(1);
 
+    // Usa bcrypt.compare internamente — o hash no ambiente de teste corresponde a 'admin-secret'
     const resetSuccess = await tryResetLeaderboard('admin-secret');
     expect(resetSuccess).toBe(true);
 
@@ -71,6 +76,10 @@ describe('LeaderboardManager Tests', () => {
 
     const leaderboard = getLeaderboard();
     expect(leaderboard.length).toBe(0);
+  });
+
+  it('should throw error when admin password is wrong', async () => {
+    await expect(tryResetLeaderboard('senha-errada')).rejects.toThrow('Senha administrativa inválida.');
   });
 
   it('should unmask user name and display email when CONFIG.FAIR_MODE is true', () => {

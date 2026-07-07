@@ -5,7 +5,7 @@ import { Button } from '../Common/Button';
 import type { User } from '../../types/user.types';
 
 interface LoginFormProps {
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: User, password: string) => void;
   setView: (view: string) => void;
   showToastMessage: (msg: string, type: 'success' | 'error') => void;
 }
@@ -51,11 +51,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({
         // Fetch full user record to pass on
         const userObj = await authService.getCurrentUser();
         if (userObj) {
-          onLoginSuccess(userObj);
+          // Passa a senha capturada no formulário — evita DOM scraping no App
+          onLoginSuccess(userObj, password);
         }
       }
-    } catch (err: any) {
-      showToastMessage(err.message || 'Erro ao efetuar login', 'error');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro ao efetuar login';
+      showToastMessage(message, 'error');
     } finally {
       setIsLoading(false);
     }

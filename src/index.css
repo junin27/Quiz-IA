@@ -140,3 +140,29 @@
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* Estilização customizada da barra de rolagem (scrollbars) para navegadores baseados em Webkit */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6); /* Fundo escuro (slate-950) */
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(244, 63, 94, 0.4); /* Destaque translúcido em rose-500 */
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(244, 63, 94, 0.7); /* Destaque mais nítido ao passar o mouse */
+}
+
+/* Estilização da barra de rolagem para o Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 63, 94, 0.4) rgba(15, 23, 42, 0.6);
+}

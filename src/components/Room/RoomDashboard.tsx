@@ -1,23 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabaseClient';
 import { roomService } from '../../services/roomService';
-import type { Room, RoomMember, RoomStats, DifficultyLevel, RagFile } from '../../types/quiz.types';
+import type { Room, RoomMember, RoomStats, DifficultyLevel } from '../../types/quiz.types';
 import { RoomMembersList } from './RoomMembersList';
 import { RoomStatsView } from './RoomStatsView';
 import { Button } from '../Common/Button';
-import { QuizSetup } from '../Quiz/QuizSetup';
+import { useRoomRealtime } from '../../hooks/useRoomRealtime';
 import { 
+  Shield, 
+  KeyRound, 
   Users, 
-  BarChart3, 
-  Copy, 
+  Clock, 
+  ChevronRight, 
   Check, 
+  Copy, 
   LogOut, 
   Play, 
-  Clock, 
-  Shield, 
-  KeyRound,
-  ChevronRight
+  BarChart3 
 } from 'lucide-react';
+import { QuizSetup } from '../Quiz/QuizSetup';
+import type { BlendedQuizOptions } from '../Quiz/QuizSetup';
 
 interface RoomDashboardProps {
   currentUserId: string;
@@ -25,16 +26,19 @@ interface RoomDashboardProps {
     topic: string,
     difficulty: DifficultyLevel,
     count: number,
-    popularExamOnly: boolean,
-    ragFiles?: RagFile[]
+    options?: BlendedQuizOptions
   ) => void;
   onActiveQuizStarted: (quizId: string) => void;
   onActiveRoomChange?: (roomId: string | null) => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
-  isIAActive: boolean; // Se o usuário tem IA ativa
+  isIAActive: boolean;
   onNavigateToApiSetup: () => void;
   isLoadingIAQuiz: boolean;
 }
+
+const getErrorMessage = (err: unknown): string => {
+  return err instanceof Error ? err.message : 'Ocorreu um erro inesperado.';
+};
 
 export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   currentUserId,
@@ -46,13 +50,11 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   onNavigateToApiSetup,
   isLoadingIAQuiz
 }) => {
-  // Estado das salas
   const [userRooms, setUserRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [stats, setStats] = useState<RoomStats | null>(null);
   
-  // Inputs e UI
   const [joinCode, setJoinCode] = useState('');
   const [activeTab, setActiveTab] = useState<'lobby' | 'members' | 'stats'>('lobby');
   const [copied, setCopied] = useState(false);
@@ -64,64 +66,17 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     if (onActiveRoomChange) {
       onActiveRoomChange(activeRoom ? activeRoom.id : null);
     }
-  }, [activeRoom]);
+  }, [activeRoom, onActiveRoomChange]);
 
-  // Carrega as salas do usuário no início
   useEffect(() => {
     loadUserRooms();
   }, [currentUserId]);
 
-  // Carrega membros e estatísticas quando a sala ativa muda
-  useEffect(() => {
-    if (activeRoom) {
-      loadRoomData(activeRoom.id);
-      setActiveTab('lobby');
-      
-      // Conectar ao canal realtime do Supabase para escutar atualizações da sala
-      const roomChannel = supabase
-        .channel(`room:${activeRoom.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'rooms',
-            filter: `id=eq.${activeRoom.id}`,
-          },
-          (payload: any) => {
-            const updatedRoom = payload.new;
-            if (updatedRoom.active_quiz_id && updatedRoom.active_quiz_id !== activeRoom.activeQuizId) {
-              showToast('Um novo quiz foi iniciado na sala! Redirecionando...', 'info');
-              onActiveQuizStarted(updatedRoom.active_quiz_id);
-            }
-          }
-        )
-        // Escuta também mudanças na tabela de membros (para atualizar a lista em tempo real)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'room_members',
-            filter: `room_id=eq.${activeRoom.id}`,
-          },
-          () => {
-            loadRoomData(activeRoom.id);
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(roomChannel);
-      };
-    }
-  }, [activeRoom]);
-
   const loadUserRooms = async () => {
     try {
-      const rooms = await roomService.getUserRooms(currentUserId);
+      const rooms = await roomService.getUserRooms();
       setUserRooms(rooms);
-    } catch (err: any) {
+    } catch {
       showToast('Erro ao carregar suas salas.', 'error');
     }
   };
@@ -134,20 +89,29 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
       ]);
       setMembers(membersList);
       setStats(roomStats);
-    } catch (err: any) {
+    } catch {
       showToast('Erro ao atualizar dados da sala.', 'error');
     }
   };
 
+  // Consumir hook de Supabase Realtime isolado
+  useRoomRealtime({
+    activeRoom,
+    onActiveQuizStarted,
+    loadRoomData,
+    showToast,
+    setActiveTab,
+  });
+
   const handleCreateRoom = async () => {
     setIsCreating(true);
     try {
-      const room = await roomService.createRoom(currentUserId);
+      const room = await roomService.createRoom();
       setActiveRoom(room);
       await loadUserRooms();
       showToast('Sala de quiz criada com sucesso!', 'success');
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     } finally {
       setIsCreating(false);
     }
@@ -155,17 +119,20 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
   const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode.trim()) return;
+    if (!joinCode.trim()) {
+      showToast('Por favor, digite o código da sala.', 'error');
+      return;
+    }
 
     setIsJoining(true);
     try {
-      const room = await roomService.joinRoom(joinCode, currentUserId);
+      const room = await roomService.joinRoom(joinCode);
       setActiveRoom(room);
       await loadUserRooms();
       setJoinCode('');
       showToast('Você entrou na sala!', 'success');
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     } finally {
       setIsJoining(false);
     }
@@ -184,8 +151,8 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
       setActiveRoom(null);
       await loadUserRooms();
       showToast('Você saiu da sala.', 'info');
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     }
   };
 
@@ -198,15 +165,14 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Funções de hierarquia mapeadas para callbacks da UI
   const handleKickMember = async (targetId: string) => {
     if (!activeRoom) return;
     try {
       await roomService.kickMember(activeRoom.id, targetId, currentUserId);
       showToast('Membro removido da sala.', 'success');
       loadRoomData(activeRoom.id);
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     }
   };
 
@@ -214,11 +180,11 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     if (!activeRoom) return;
     try {
       const nextStatus = currentStatus === 'active' ? 'absent' : 'active';
-      await roomService.updateMemberStatus(activeRoom.id, targetId, nextStatus, currentUserId);
+      await roomService.updateMemberStatus(activeRoom.id, targetId, nextStatus);
       showToast(nextStatus === 'absent' ? 'Membro marcado como Ausente.' : 'Membro marcado como Ativo.', 'success');
       loadRoomData(activeRoom.id);
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     }
   };
 
@@ -226,15 +192,14 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     if (!activeRoom) return;
     try {
       const nextRole = currentRole === 'leader' ? 'member' : 'leader';
-      await roomService.updateMemberRole(activeRoom.id, targetId, nextRole, currentUserId);
+      await roomService.updateMemberRole(activeRoom.id, targetId, nextRole);
       showToast(nextRole === 'leader' ? 'Membro promovido a Líder.' : 'Líder rebaixado a Membro.', 'success');
       loadRoomData(activeRoom.id);
-    } catch (err: any) {
-      showToast(err.message, 'error');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
     }
   };
 
-  // Retorna se o usuário logado é dono ou líder da sala
   const getMyRole = (): 'owner' | 'leader' | 'member' => {
     const me = members.find((m) => m.userId === currentUserId);
     return me?.role || 'member';
@@ -243,7 +208,6 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   const myRole = getMyRole();
   const canStartQuiz = myRole === 'owner' || myRole === 'leader';
 
-  // Formata tempo restante da expiração de 7 dias
   const formatExpiration = (expiresAtStr: string): string => {
     const diff = new Date(expiresAtStr).getTime() - Date.now();
     if (diff <= 0) return 'Expirou';
@@ -258,11 +222,8 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   return (
     <div className="w-full max-w-4xl mx-auto my-6 space-y-6">
       {!activeRoom ? (
-        // ─── TELA INICIAL: LISTA E CRIAÇÃO DE SALAS ────────────────────────────
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Lado Esquerdo: Ações rápidas */}
           <div className="md:col-span-1 space-y-6">
-            {/* Criar Sala */}
             <div className="glass-card p-6 rounded-2xl relative overflow-hidden space-y-4">
               <div className="absolute -top-10 -right-10 w-28 h-28 bg-rose-500/10 rounded-full blur-2xl pointer-events-none" />
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -277,35 +238,33 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
               </Button>
             </div>
 
-            {/* Ingressar na Sala */}
             <div className="glass-card p-6 rounded-2xl relative overflow-hidden">
-              <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
               <form onSubmit={handleJoinRoom} className="space-y-4">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <KeyRound size={18} className="text-amber-400" />
+                  <KeyRound size={18} className="text-rose-400" />
                   Entrar com Código
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Digite o código de 6 caracteres fornecido pelo criador da sala.
                 </p>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-3">
                   <input
                     type="text"
                     maxLength={6}
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                     placeholder="EX: A1B2C3"
-                    className="flex-1 px-4 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-center font-bold tracking-widest font-mono text-sm uppercase"
+                    className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-center font-bold tracking-widest font-mono text-sm uppercase"
                   />
-                  <Button type="submit" isLoading={isJoining} className="px-4 shrink-0">
-                    Entrar
+                  <Button type="submit" isLoading={isJoining} className="w-full">
+                    Entrar na Sala
                   </Button>
                 </div>
               </form>
             </div>
           </div>
 
-          {/* Lado Direito: Suas salas ativas */}
           <div className="md:col-span-2 glass-card p-6 rounded-2xl flex flex-col min-h-[300px]">
             <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4 border-b border-slate-800 pb-3">
               <Users size={18} className="text-rose-400" />
@@ -348,9 +307,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
           </div>
         </div>
       ) : (
-        // ─── TELA DETALHADA DA SALA ATIVA ─────────────────────────────────────
         <div className="glass-card rounded-2xl overflow-hidden">
-          {/* Header da Sala */}
           <div className="p-6 bg-slate-950/40 border-b border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-3">
@@ -366,7 +323,6 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2.5">
-              {/* Copiar Link */}
               <button
                 onClick={copyRoomLink}
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 rounded-xl text-xs text-slate-350 font-bold transition-all"
@@ -375,7 +331,6 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
                 <span>Copiar Link</span>
               </button>
 
-              {/* Sair da Sala */}
               <button
                 onClick={handleLeaveRoom}
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/35 rounded-xl text-xs text-rose-400 font-bold transition-all"
@@ -386,7 +341,6 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
             </div>
           </div>
 
-          {/* Navegação de Abas */}
           <div className="flex border-b border-slate-800 bg-slate-950/20">
             <button
               onClick={() => { setActiveTab('lobby'); setIsStartingQuiz(false); }}
@@ -423,7 +377,6 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
             </button>
           </div>
 
-          {/* Conteúdo das Abas */}
           <div className="p-6">
             {activeTab === 'lobby' && (
               <div className="space-y-6">
@@ -447,7 +400,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
                         ) : (
                           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2 text-left">
                             <p className="text-xs text-amber-300 leading-relaxed">
-                              <strong>Chave de API do Dono pendente:</strong> Para poder gerar quizzes personalizados nesta sala, você precisa configurar uma chave de IA (como Gemini) em suas credenciais.
+                              <strong>Chave de API do Dono pendente:</strong> Para poder gerar quizzes personalizados nesta sala, você precisa configurar uma chave de IA em suas credenciais.
                             </p>
                             <Button onClick={onNavigateToApiSetup} className="w-full text-xs py-2 bg-amber-500 hover:bg-amber-600 border-none text-slate-950 font-bold">
                               Configurar API Key
@@ -475,9 +428,9 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
                     <QuizSetup
                       isLoading={isLoadingIAQuiz}
-                      isTriviaMode={false} // Apenas IA nas salas para manter o padrão premium
-                      onStartQuiz={async (topic, difficulty, count, popularExamOnly, ragFiles) => {
-                        onStartRoomQuiz(topic, difficulty, count, popularExamOnly || false, ragFiles);
+                      isTriviaMode={false}
+                      onStartQuiz={async (topic, difficulty, count, options) => {
+                        onStartRoomQuiz(topic, difficulty, count, options);
                       }}
                     />
                   </div>
@@ -505,4 +458,5 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     </div>
   );
 };
+
 export default RoomDashboard;

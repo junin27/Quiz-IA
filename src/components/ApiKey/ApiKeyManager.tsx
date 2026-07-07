@@ -6,7 +6,7 @@ import type { User } from '../../types/user.types';
 import type { LLMProvider } from '../../types/apiKey.types';
 import { Button } from '../Common/Button';
 import { CustomDropdown } from '../Common/CustomDropdown';
-import { Check, X, Trash2, Edit, Plus, AlertTriangle } from 'lucide-react';
+import { Check, X, Trash2, Edit, Plus, AlertTriangle, WifiOff } from 'lucide-react';
 import { Modal } from '../Common/Modal';
 
 interface ApiKeyManagerProps {
@@ -14,6 +14,7 @@ interface ApiKeyManagerProps {
   currentUserPassword: string;
   onUpdateSuccess: (updatedUser: User) => void;
   showToastMessage: (msg: string, type: 'success' | 'error') => void;
+  isSetupMode?: boolean;
 }
 
 const PROVIDERS: { value: LLMProvider; label: string; placeholder: string }[] = [
@@ -30,7 +31,8 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
   currentUser,
   currentUserPassword,
   onUpdateSuccess,
-  showToastMessage
+  showToastMessage,
+  isSetupMode = false
 }) => {
   const globalKey = localStorage.getItem('quiz_app_global_api_key');
   const globalProvider = (localStorage.getItem('quiz_app_global_api_provider') as LLMProvider) || 'gemini';
@@ -74,7 +76,7 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
   const [selectedModelOption, setSelectedModelOption] = useState<string>(() => getInitialModelOption(initialProvider, initialModelId));
   const [customModelId, setCustomModelId] = useState<string>(() => getInitialCustomModelId(initialProvider, initialModelId));
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(isSetupMode);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   const displayProviderLabel = PROVIDERS.find(p => p.value === keyRecord?.provider)?.label || 'Desconhecido';
@@ -110,15 +112,17 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
     setIsConfirmOpen(false);
   };
 
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apiKey.trim()) {
+  const handleUpdate = async (e?: React.FormEvent, mockKey?: string) => {
+    if (e) e.preventDefault();
+    const keyToUse = mockKey || apiKey.trim();
+    if (!keyToUse) {
       showToastMessage('Por favor, informe a nova chave.', 'error');
       return;
     }
 
     setIsUpdating(true);
     try {
+      const isMock = keyToUse === 'mock-key-for-testing';
       const finalModelId = selectedModelOption === 'outro' ? customModelId.trim() : selectedModelOption;
       if (selectedModelOption === 'outro' && !finalModelId) {
         showToastMessage('Por favor, especifique o ID do modelo personalizado.', 'error');
@@ -126,7 +130,7 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
         return;
       }
 
-      const validation = await validateApiKey(apiKey.trim(), provider, finalModelId || undefined);
+      const validation = await validateApiKey(keyToUse, provider, finalModelId || undefined);
       if (!validation.valid) {
         showToastMessage(validation.error || 'Chave inválida.', 'error');
         setIsUpdating(false);
@@ -134,7 +138,7 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
       }
 
       // Salva a chave de forma global no localStorage
-      localStorage.setItem('quiz_app_global_api_key', apiKey.trim());
+      localStorage.setItem('quiz_app_global_api_key', keyToUse);
       localStorage.setItem('quiz_app_global_api_provider', provider);
       if (finalModelId) {
         localStorage.setItem('quiz_app_global_api_modelId', finalModelId);
@@ -142,14 +146,14 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
         localStorage.removeItem('quiz_app_global_api_modelId');
       }
 
-      const encrypted = await encryptApiKey(apiKey.trim(), currentUserPassword);
+      const encrypted = await encryptApiKey(keyToUse, currentUserPassword);
       const updatedUser: User = {
         ...currentUser,
         apiKey: {
           provider,
           modelId: finalModelId || undefined,
           encryptedKey: encrypted,
-          lastFourChars: apiKey.trim().slice(-4),
+          lastFourChars: isMock ? 'MOCK' : keyToUse.slice(-4),
           createdAt: new Date().toISOString(),
           lastUsedAt: new Date().toISOString(),
           isActive: true
@@ -157,7 +161,12 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
       };
 
       sessionStore.saveUser(updatedUser);
-      showToastMessage('Chave de API atualizada com sucesso!', 'success');
+      showToastMessage(
+        isMock
+          ? 'Modo Offline (Simulador) ativado com sucesso!'
+          : 'Chave de API configurada com sucesso!',
+        'success'
+      );
       onUpdateSuccess(updatedUser);
       setIsEditing(false);
       setApiKey('');
@@ -184,13 +193,21 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
   return (
     <div className="glass-card p-6 rounded-2xl border border-slate-800/80 shadow-2xl space-y-6">
       <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-        <h3 className="text-lg font-bold text-white">GERENCIAMENTO DE CHAVE DE API</h3>
+        <h3 className="text-lg font-bold text-white">
+          {isSetupMode ? 'CONFIGURAR INTELIGÊNCIA ARTIFICIAL' : 'GERENCIAMENTO DE CHAVE DE API'}
+        </h3>
         {keyRecord && !isOfflineMock && !isEditing && (
           <span className="text-xs bg-rose-500/20 text-rose-400 font-semibold px-2.5 py-1 rounded-full">
             {displayProviderLabel}
           </span>
         )}
       </div>
+
+      {isSetupMode && isEditing && (
+        <p className="text-slate-400 text-xs leading-relaxed">
+          Insira sua chave de API para que a IA gere perguntas personalizadas em tempo real.
+        </p>
+      )}
 
       {/* Estado: sem chave real ativa (null ou simulador mock) */}
       {!hasActiveKey && !isEditing ? (
@@ -320,26 +337,52 @@ export const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 pt-2">
-            {keyRecord && (
-              <Button
-                type="button"
-                variant="danger"
-                onClick={() => setIsEditing(false)}
-                className="flex-1 text-xs font-bold uppercase gap-2"
-              >
-                <X size={16} strokeWidth={3.5} />
-                CANCELAR
-              </Button>
+            {isSetupMode ? (
+              <>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => handleUpdate(undefined, 'mock-key-for-testing')}
+                  disabled={isUpdating}
+                  className="flex-1 text-xs font-bold uppercase gap-2"
+                >
+                  <WifiOff size={16} strokeWidth={3.5} />
+                  USAR SIMULADOR OFFLINE
+                </Button>
+                <Button
+                  type="submit"
+                  variant="success"
+                  isLoading={isUpdating}
+                  className="flex-1 text-xs font-bold uppercase gap-2"
+                >
+                  <Check size={16} strokeWidth={3.5} />
+                  VALIDAR E SALVAR
+                </Button>
+              </>
+            ) : (
+              <>
+                {keyRecord && (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setIsEditing(false)}
+                    className="flex-1 text-xs font-bold uppercase gap-2"
+                  >
+                    <X size={16} strokeWidth={3.5} />
+                    CANCELAR
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  variant="success"
+                  isLoading={isUpdating}
+                  className="flex-1 text-xs font-bold uppercase gap-2"
+                >
+                  <Check size={16} strokeWidth={3.5} />
+                  SALVAR CHAVE
+                </Button>
+              </>
             )}
-            <Button
-              type="submit"
-              variant="success"
-              isLoading={isUpdating}
-              className="flex-1 text-xs font-bold uppercase gap-2"
-            >
-              <Check size={16} strokeWidth={3.5} />
-              SALVAR CHAVE
-            </Button>
           </div>
         </form>
       )}

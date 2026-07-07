@@ -182,17 +182,45 @@ export async function parseXlsx(file: File): Promise<string> {
   return text;
 }
 
+export interface PdfJsDocument {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<{
+    getTextContent: () => Promise<{
+      items: Array<{ str: string }>;
+    }>;
+  }>;
+}
+
+export interface PdfJsEngine {
+  GlobalWorkerOptions: {
+    workerSrc: string;
+  };
+  getDocument: (options: { data: ArrayBuffer }) => {
+    promise: Promise<PdfJsDocument>;
+  };
+}
+
+export interface WindowWithPdfJs extends Window {
+  pdfjsLib?: PdfJsEngine;
+  'pdfjs-dist/build/pdf'?: PdfJsEngine;
+}
+
 // 5. Carregar biblioteca PDF.js de forma assíncrona
-export async function loadPdfJS(): Promise<any> {
-  if ((window as any).pdfjsLib) {
-    return (window as any).pdfjsLib;
+export async function loadPdfJS(): Promise<PdfJsEngine> {
+  const win = window as unknown as WindowWithPdfJs;
+  if (win.pdfjsLib) {
+    return win.pdfjsLib;
   }
   
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
     script.onload = () => {
-      const pdfjs = (window as any)['pdfjs-dist/build/pdf'];
+      const pdfjs = win['pdfjs-dist/build/pdf'];
+      if (!pdfjs) {
+        reject(new Error('Falha ao inicializar o motor de PDF.'));
+        return;
+      }
       pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       resolve(pdfjs);
     };
@@ -202,7 +230,7 @@ export async function loadPdfJS(): Promise<any> {
 }
 
 // 6. Parser do PDF (.pdf)
-export async function parsePdf(file: File, pdfjs: any): Promise<string> {
+export async function parsePdf(file: File, pdfjs: PdfJsEngine): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
   const pdf = await loadingTask.promise;
@@ -211,7 +239,7 @@ export async function parsePdf(file: File, pdfjs: any): Promise<string> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item: any) => item.str).join(' ');
+    const pageText = textContent.items.map((item) => item.str).join(' ');
     if (pageText.trim()) {
       text += `[Página ${i}]\n${pageText}\n\n`;
     }
